@@ -1,14 +1,754 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html lang="ko">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Hello World</title>
-  <link href='/style.css' rel='stylesheet'>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backtesting Game - AI Trading Tracker</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM (via ESM) -->
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.263.1"
+      }
+    }
+    </script>
+    
+    <!-- Babel for in-browser JSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        /* Custom Scrollbar for Webkit */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1f2937; 
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #4b5563; 
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #6b7280; 
+        }
+        body { background-color: #111827; color: white; }
+    </style>
 </head>
 <body>
-  <h1>Hello, world!</h1>
-  <button onclick="console.log('hello');">Press me</button>
-  <script defer type="text/javascript" src="/main.js"></script>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { 
+          Trophy, Plus, Download, Activity, Trash2, Grid, ChevronRight, 
+          CheckCircle, XCircle, MinusCircle, Sparkles, Zap, Settings, 
+          Calendar, Layout, Type, Hash, X, ArrowLeft, ArrowRight, 
+          Monitor, ArrowUp, ArrowDown, Image as ImageIcon, Maximize2, 
+          UploadCloud, Save, FolderUp, FolderDown
+        } from 'lucide-react';
+
+        const STORAGE_KEY = 'backtesting_game_data_v5';
+
+        // --- Badges Definition ---
+        const BADGES = [
+          { id: 'rookie', name: '초심자의 행운', description: '첫 번째 백테스팅 기록 완료', icon: '🌱', threshold: 1 },
+          { id: 'bronze', name: '브론즈 테스터', description: '데이터 10개 기록', icon: '🥉', threshold: 10 },
+          { id: 'silver', name: '실버 테스터', description: '데이터 50개 기록', icon: '🥈', threshold: 50 },
+          { id: 'gold', name: '골드 테스터', description: '데이터 100개 기록', icon: '🥇', threshold: 100 },
+          { id: 'master', name: '백테스팅 마스터', description: '데이터 500개 기록', icon: '👑', threshold: 500 },
+        ];
+
+        const DEFAULT_TICKERS = ['NAS100', 'XAUUSD', 'BTCUSD', 'ETHUSD', 'US500', 'US30', 'EURUSD', 'JPYUSD'];
+
+        function App() {
+          // --- State ---
+          const [projects, setProjects] = useState([]);
+          const [activeProjectId, setActiveProjectId] = useState(null);
+          const [userProfile, setUserProfile] = useState({ level: 1, xp: 0, totalLogs: 0, unlockedBadges: [] });
+          
+          // Modals
+          const [isProjectModalOpen, setIsProjectModalOpen] = useState(false);
+          const [isFieldEditorOpen, setIsFieldEditorOpen] = useState(false);
+          const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState(false);
+          const [selectedLog, setSelectedLog] = useState(null); 
+          const [zoomedImage, setZoomedImage] = useState(null);
+
+          // Temporary States
+          const [newProjectName, setNewProjectName] = useState('');
+          const [analysisResult, setAnalysisResult] = useState(null);
+          const [isAnalyzing, setIsAnalyzing] = useState(false);
+          
+          // Field Editor States
+          const [newBlockName, setNewBlockName] = useState('');
+          const [newBlockType, setNewBlockType] = useState('text');
+          
+          // Tracker Settings
+          const [viewLimit, setViewLimit] = useState(100); 
+          const [viewMode, setViewMode] = useState('continuous'); 
+
+          // Input Form State
+          const [inputDate, setInputDate] = useState(new Date().toISOString().slice(0, 10));
+          const [inputSymbol, setInputSymbol] = useState('NAS100');
+          const [isCustomSymbol, setIsCustomSymbol] = useState(false);
+          const [inputResult, setInputResult] = useState('win'); 
+          const [dynamicValues, setDynamicValues] = useState({});
+
+          // Backup Input Ref
+          const fileInputRef = useRef(null);
+
+          // --- Load/Save Data ---
+          useEffect(() => {
+            const savedData = localStorage.getItem(STORAGE_KEY);
+            if (savedData) {
+              try {
+                const parsed = JSON.parse(savedData);
+                setProjects(parsed.projects || []);
+                setUserProfile(parsed.userProfile || { level: 1, xp: 0, totalLogs: 0, unlockedBadges: [] });
+              } catch (e) {
+                console.error("Data Load Error", e);
+              }
+            }
+          }, []);
+
+          useEffect(() => {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ projects, userProfile }));
+          }, [projects, userProfile]);
+
+          // Reset inputs when project changes
+          useEffect(() => {
+            setDynamicValues({});
+            setInputDate(new Date().toISOString().slice(0, 10));
+            setInputResult('win');
+            setInputSymbol('NAS100');
+            setIsCustomSymbol(false);
+          }, [activeProjectId]);
+
+          // --- Logic Helpers ---
+          const calculateLevel = (xp) => Math.floor(xp / 100) + 1;
+          const getXpProgress = (xp) => xp % 100;
+
+          const checkBadges = (currentTotalLogs) => {
+            const newBadges = [];
+            BADGES.forEach(badge => {
+              if (currentTotalLogs >= badge.threshold && !userProfile.unlockedBadges.includes(badge.id)) {
+                newBadges.push(badge.id);
+              }
+            });
+            return newBadges;
+          };
+
+          const createProject = () => {
+            if (!newProjectName.trim()) return;
+            const initialFields = [
+              { id: 'memo', label: '메모', type: 'text' },
+              { id: 'strategy', label: '매매 전략', type: 'text' },
+              { id: 'pnl', label: '수익금($)', type: 'number' },
+              { id: 'chart', label: '차트 스크린샷', type: 'image' }
+            ];
+
+            const newProject = {
+              id: Date.now(),
+              name: newProjectName,
+              createdAt: new Date().toISOString(),
+              library: initialFields, 
+              layout: ['chart', 'memo'], 
+              logs: [], 
+            };
+            setProjects([...projects, newProject]);
+            setNewProjectName('');
+            setIsProjectModalOpen(false);
+            setActiveProjectId(newProject.id);
+          };
+
+          const deleteProject = (id) => {
+            if (confirm('정말 이 프로젝트를 삭제하시겠습니까? 모든 데이터가 사라집니다.')) {
+              setProjects(projects.filter(p => p.id !== id));
+              if (activeProjectId === id) setActiveProjectId(null);
+            }
+          };
+
+          // --- Backup & Restore Logic ---
+          const backupData = () => {
+            const dataStr = JSON.stringify({ projects, userProfile }, null, 2);
+            const blob = new Blob([dataStr], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `backtesting_backup_${new Date().toISOString().slice(0,10)}.json`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          };
+
+          const restoreData = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            if (!confirm("현재 데이터를 덮어쓰고 복구하시겠습니까? (복구 후 자동으로 새로고침됩니다)")) {
+              e.target.value = null;
+              return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              try {
+                const parsed = JSON.parse(event.target.result);
+                if (parsed.projects && parsed.userProfile) {
+                  localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+                  alert("성공적으로 복구되었습니다.");
+                  window.location.reload();
+                } else {
+                  alert("올바르지 않은 백업 파일입니다.");
+                }
+              } catch (err) {
+                alert("파일을 읽는 중 오류가 발생했습니다.");
+              }
+            };
+            reader.readAsText(file);
+          };
+
+          // --- Field Editor Logic ---
+          const activeProject = projects.find(p => p.id === activeProjectId);
+
+          const createBlock = () => {
+            if (!activeProject || !newBlockName.trim()) return;
+            const newBlock = { 
+              id: `field_${Date.now()}`, 
+              label: newBlockName, 
+              type: newBlockType 
+            };
+            const updatedProjects = projects.map(p => {
+              if (p.id === activeProjectId) {
+                return { ...p, library: [...p.library, newBlock] };
+              }
+              return p;
+            });
+            setProjects(updatedProjects);
+            setNewBlockName('');
+          };
+
+          const deleteBlock = (blockId) => {
+            if (!confirm("보관함에서 이 블록을 완전히 삭제하시겠습니까?")) return;
+            const updatedProjects = projects.map(p => {
+              if (p.id === activeProjectId) {
+                return { 
+                  ...p, 
+                  library: p.library.filter(f => f.id !== blockId),
+                  layout: p.layout.filter(id => id !== blockId)
+                };
+              }
+              return p;
+            });
+            setProjects(updatedProjects);
+          };
+
+          const moveToActive = (blockId) => {
+            const updatedProjects = projects.map(p => {
+              if (p.id === activeProjectId) {
+                if (p.layout.includes(blockId)) return p;
+                return { ...p, layout: [...p.layout, blockId] };
+              }
+              return p;
+            });
+            setProjects(updatedProjects);
+          };
+
+          const moveToLibrary = (blockId) => {
+            const updatedProjects = projects.map(p => {
+              if (p.id === activeProjectId) {
+                return { ...p, layout: p.layout.filter(id => id !== blockId) };
+              }
+              return p;
+            });
+            setProjects(updatedProjects);
+          };
+
+          const moveOrder = (index, direction) => {
+            if (!activeProject) return;
+            const newLayout = [...activeProject.layout];
+            const targetIndex = direction === 'up' ? index - 1 : index + 1;
+            if (targetIndex < 0 || targetIndex >= newLayout.length) return;
+            [newLayout[index], newLayout[targetIndex]] = [newLayout[targetIndex], newLayout[index]];
+            const updatedProjects = projects.map(p => {
+              if (p.id === activeProjectId) {
+                return { ...p, layout: newLayout };
+              }
+              return p;
+            });
+            setProjects(updatedProjects);
+          };
+
+          // --- Log Logic ---
+          const addLog = () => {
+            if (!activeProjectId) return;
+            const newLog = {
+              id: Date.now(),
+              date: inputDate,
+              symbol: inputSymbol,
+              result: inputResult,
+              ...dynamicValues
+            };
+            const updatedProjects = projects.map(p => {
+              if (p.id === activeProjectId) {
+                return { ...p, logs: [...p.logs, newLog] };
+              }
+              return p;
+            });
+            setProjects(updatedProjects);
+
+            const xpGain = 10;
+            const nextTotalLogs = userProfile.totalLogs + 1;
+            const newBadges = checkBadges(nextTotalLogs);
+            if (newBadges.length > 0) {
+              const badgeNames = BADGES.filter(b => newBadges.includes(b.id)).map(b => b.name).join(', ');
+              alert(`🎉 축하합니다! 새로운 뱃지를 획득했습니다: ${badgeNames}`);
+            }
+
+            setUserProfile(prev => ({
+              ...prev,
+              xp: prev.xp + xpGain,
+              level: calculateLevel(prev.xp + xpGain),
+              totalLogs: nextTotalLogs,
+              unlockedBadges: [...prev.unlockedBadges, ...newBadges]
+            }));
+            setDynamicValues({});
+          };
+
+          const handleDynamicChange = (fieldId, value) => {
+            setDynamicValues(prev => ({ ...prev, [fieldId]: value }));
+          };
+
+          const handleImagePaste = (e, fieldId) => {
+            const items = e.clipboardData.items;
+            for (let i = 0; i < items.length; i++) {
+              if (items[i].type.indexOf("image") !== -1) {
+                e.preventDefault();
+                const blob = items[i].getAsFile();
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                  handleDynamicChange(fieldId, event.target.result);
+                };
+                reader.readAsDataURL(blob);
+                break;
+              }
+            }
+          };
+
+          const exportToCSV = (project) => {
+            if (!project || project.logs.length === 0) {
+              alert('내보낼 데이터가 없습니다.');
+              return;
+            }
+            const textFields = project.library.filter(f => f.type !== 'image');
+            const headers = ['Date', 'Symbol', 'Result', ...textFields.map(f => f.label)];
+            const rows = project.logs.map(log => {
+              const basicData = [
+                log.date, log.symbol || '-', log.result === 'win' ? '익절' : log.result === 'loss' ? '손절' : '본절',
+              ];
+              const customData = textFields.map(f => `"${(log[f.id] || '').toString().replace(/"/g, '""')}"`);
+              return [...basicData, ...customData];
+            });
+            const csvContent = "data:text/csv;charset=utf-8,\uFEFF" + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", `${project.name}_backtest_data.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          };
+
+          const generateOfflineAnalysis = () => {
+            if (!activeProject || activeProject.logs.length < 3) {
+              alert("분석을 위해 최소 3개 이상의 데이터가 필요합니다.");
+              return;
+            }
+            setIsAnalyzing(true);
+            setIsAnalysisModalOpen(true);
+            setAnalysisResult(null);
+
+            setTimeout(() => {
+              const stats = getStats(activeProject.logs);
+              const recentLogs = activeProject.logs.slice(-5);
+              const recentWins = recentLogs.filter(l => l.result === 'win').length;
+              let personality = "";
+              const wr = Number(stats.winRate);
+              if (stats.total < 10) personality = "🌱 성장하는 새싹 (Rookie)";
+              else if (wr >= 75) personality = "🎯 냉철한 스나이퍼 (Sniper)";
+              else if (wr >= 55) personality = "⚖️ 균형 잡힌 전략가 (Strategist)";
+              else personality = "🛡️ 방어력 강화가 필요한 전사";
+              const advice = recentWins >= 4 ? "최근 폼이 아주 좋습니다! 🔥 자만심을 경계하고 원칙을 지키세요." : "꾸준함이 가장 강력한 무기입니다. 데이터를 계속 쌓아가세요.";
+              const quests = ["다음 매매에서 '진입 근거' 3줄 이상 상세히 적기", "오늘은 딱 1번만 더 매매하고 차트 끄기", "손익비 2:1 이상의 자리 기다리기"];
+              const quest = quests[(new Date().getDate()) % quests.length];
+              const resultText = `🕵️ **트레이더 성향 분석**: ${personality}\n승률: ${stats.winRate}%\n\n💡 **전략적 조언**\n${advice}\n\n📜 **오늘의 퀘스트**\n"${quest}"`;
+              setAnalysisResult(resultText);
+              setIsAnalyzing(false);
+            }, 1500);
+          };
+
+          const getStats = (logs) => {
+            if (!logs || logs.length === 0) return { winRate: 0, win: 0, loss: 0, be: 0, total: 0 };
+            const win = logs.filter(l => l.result === 'win').length;
+            const loss = logs.filter(l => l.result === 'loss').length;
+            const be = logs.filter(l => l.result === 'break_even').length;
+            const total = logs.length;
+            const winRate = total > 0 ? ((win / total) * 100).toFixed(1) : 0;
+            return { winRate, win, loss, be, total };
+          };
+
+          const stats = activeProject ? getStats(activeProject.logs) : null;
+
+          const getFilteredLogs = () => {
+            if (!activeProject) return [];
+            let logs = [...activeProject.logs];
+            if (viewLimit > 0) logs = logs.slice(-viewLimit);
+            return logs;
+          };
+
+          // Render Functions
+          const renderTracker = () => {
+            const logs = getFilteredLogs();
+            const totalSlots = viewLimit > 0 ? viewLimit : logs.length;
+
+            if (viewMode === 'continuous') {
+              return (
+                <div className="flex flex-wrap gap-1.5 p-4 bg-gray-900/50 rounded-lg min-h-[100px] content-start">
+                  {logs.map((log, idx) => (
+                    <div key={log.id} onClick={() => setSelectedLog(log)}
+                      className={`w-6 h-6 rounded-sm cursor-pointer hover:ring-2 hover:ring-white transition-all transform hover:scale-110 ${log.result === 'win' ? 'bg-green-500' : log.result === 'loss' ? 'bg-red-500' : 'bg-gray-500'}`}
+                    />
+                  ))}
+                  {Array.from({ length: Math.max(0, totalSlots - logs.length) }).map((_, i) => (
+                     <div key={`empty-${i}`} className="w-6 h-6 rounded-sm bg-gray-800 border border-gray-700/50" />
+                  ))}
+                  {viewLimit === 0 && logs.length === 0 && <div className="text-gray-500 text-sm">데이터가 없습니다.</div>}
+                </div>
+              );
+            } else {
+              const grouped = logs.reduce((acc, log) => {
+                const month = log.date.substring(0, 7); 
+                if (!acc[month]) acc[month] = [];
+                acc[month].push(log);
+                return acc;
+              }, {});
+              return (
+                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                  {Object.keys(grouped).sort().reverse().map(month => (
+                    <div key={month} className="bg-gray-900/40 p-3 rounded-lg border border-gray-700/50">
+                      <div className="text-sm text-gray-300 mb-2 font-bold flex items-center">
+                        <Calendar size={14} className="mr-2 text-purple-400" /> {month} 
+                        <span className="ml-2 text-xs font-normal text-gray-500">({grouped[month].length} trades)</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {grouped[month].map(log => (
+                           <div key={log.id} onClick={() => setSelectedLog(log)}
+                           className={`w-6 h-6 rounded-sm cursor-pointer hover:ring-2 hover:ring-white transition-all ${log.result === 'win' ? 'bg-green-500' : log.result === 'loss' ? 'bg-red-500' : 'bg-gray-500'}`} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {logs.length === 0 && <div className="text-gray-500 text-sm p-4 text-center">데이터가 없습니다.</div>}
+                </div>
+              );
+            }
+          };
+
+          return (
+            <div className="min-h-screen bg-gray-900 text-gray-100 font-sans pb-20">
+              {/* Header */}
+              <header className="sticky top-0 z-10 bg-gray-800 border-b border-gray-700 shadow-lg">
+                <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <div className="bg-purple-600 p-2 rounded-lg">
+                      <Trophy className="w-5 h-5 text-white" />
+                    </div>
+                    <div>
+                      <h1 className="text-lg font-bold text-white">Backtest Game <span className="text-xs font-normal text-purple-300">v5.0</span></h1>
+                      <div className="flex items-center text-xs text-gray-400 space-x-2">
+                        <span className="text-purple-400 font-semibold">Lv.{userProfile.level}</span>
+                        <span>Total Logs: {userProfile.totalLogs}</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* Backup Controls (New!) */}
+                  <div className="flex items-center space-x-2">
+                     <input type="file" ref={fileInputRef} onChange={restoreData} className="hidden" accept=".json" />
+                     <button onClick={() => fileInputRef.current.click()} className="p-2 text-gray-400 hover:text-white bg-gray-700 rounded-lg text-xs flex items-center" title="데이터 복구">
+                        <FolderDown size={16} className="mr-1" /> 복구
+                     </button>
+                     <button onClick={backupData} className="p-2 text-gray-400 hover:text-white bg-gray-700 rounded-lg text-xs flex items-center" title="데이터 백업">
+                        <FolderUp size={16} className="mr-1" /> 백업
+                     </button>
+                  </div>
+                </div>
+              </header>
+
+              <main className="max-w-6xl mx-auto px-4 py-8">
+                <div className="flex flex-col md:flex-row gap-6">
+                  {/* Sidebar */}
+                  <aside className="w-full md:w-64 flex-shrink-0 space-y-6">
+                    <div className="bg-gray-800 rounded-xl p-4 shadow-md border border-gray-700">
+                      <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">프로젝트</h2>
+                        <button onClick={() => setIsProjectModalOpen(true)} className="p-1 hover:bg-gray-700 rounded-full text-purple-400"><Plus size={18} /></button>
+                      </div>
+                      <div className="space-y-2 max-h-60 overflow-y-auto custom-scrollbar">
+                        {projects.map(project => (
+                          <div key={project.id} onClick={() => setActiveProjectId(project.id)}
+                            className={`cursor-pointer p-3 rounded-lg flex justify-between items-center transition-all ${activeProjectId === project.id ? 'bg-purple-900/30 border border-purple-500/50 text-purple-100' : 'bg-gray-700/30 hover:bg-gray-700 text-gray-300'}`}>
+                            <div className="truncate pr-2">
+                              <div className="font-medium text-sm">{project.name}</div>
+                              <div className="text-xs text-gray-500">{project.logs.length} logs</div>
+                            </div>
+                            {activeProjectId === project.id && <ChevronRight size={16} />}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    {/* Badges */}
+                    <div className="bg-gray-800 rounded-xl p-4 shadow-md border border-gray-700">
+                      <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-4">획득한 뱃지</h2>
+                      <div className="grid grid-cols-4 gap-2">
+                        {BADGES.map(badge => (
+                          <div key={badge.id} className={`aspect-square rounded-lg flex items-center justify-center text-xl ${userProfile.unlockedBadges.includes(badge.id) ? 'bg-gray-700 border border-yellow-600/50' : 'bg-gray-800 opacity-30 grayscale'}`} title={badge.name}>
+                            {badge.icon}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </aside>
+
+                  {/* Main Section */}
+                  <section className="flex-1 space-y-6">
+                    {activeProject ? (
+                      <>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="bg-gray-800 p-4 rounded-xl border border-gray-700">
+                            <div className="text-gray-400 text-xs uppercase mb-1">Win Rate</div>
+                            <div className={`text-2xl font-bold ${Number(stats.winRate) >= 50 ? 'text-green-400' : 'text-red-400'}`}>{stats.winRate}%</div>
+                          </div>
+                          <div className="bg-gray-800 p-4 rounded-xl border border-gray-700"><div className="text-gray-400 text-xs uppercase mb-1">Total Trades</div><div className="text-2xl font-bold text-white">{stats.total}</div></div>
+                          <div className="bg-gray-800 p-4 rounded-xl border border-gray-700 flex flex-col justify-center">
+                            <div className="flex items-center text-xs text-green-400 mb-1"><CheckCircle size={12} className="mr-1" /> Wins: {stats.win}</div>
+                            <div className="flex items-center text-xs text-red-400 mb-1"><XCircle size={12} className="mr-1" /> Losses: {stats.loss}</div>
+                          </div>
+                          <div className="bg-gray-800 p-2 rounded-xl border border-gray-700 flex flex-col gap-2 justify-center">
+                            <button onClick={generateOfflineAnalysis} disabled={activeProject.logs.length < 3} className="flex-1 flex items-center justify-center bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-lg text-xs font-bold transition-all disabled:opacity-50"><Sparkles size={14} className="mr-1" /> 패턴 분석</button>
+                            <button onClick={() => exportToCSV(activeProject)} className="flex-1 flex items-center justify-center bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg text-xs transition-all"><Download size={14} className="mr-1" /> 엑셀 저장</button>
+                          </div>
+                        </div>
+
+                        {/* Input Area */}
+                        <div className="bg-gray-800 rounded-xl border border-gray-700 shadow-md overflow-hidden">
+                          <div className="bg-gray-850 p-4 border-b border-gray-700 flex justify-between items-center">
+                            <h3 className="text-lg font-bold text-white flex items-center"><Activity className="mr-2 text-purple-400" size={20} /> 데이터 기록</h3>
+                            <button onClick={() => setIsFieldEditorOpen(true)} className="text-xs flex items-center bg-indigo-600 hover:bg-indigo-500 px-3 py-1.5 rounded-lg text-white transition-colors font-semibold"><Settings size={14} className="mr-1" /> 필드 편집 (블록 설정)</button>
+                          </div>
+                          
+                          <div className="p-5 grid grid-cols-1 md:grid-cols-12 gap-4">
+                            <div className="md:col-span-3">
+                              <label className="block text-xs text-gray-500 mb-1">날짜 (Date)</label>
+                              <input type="date" value={inputDate} onChange={(e) => setInputDate(e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-gray-200 text-sm focus:border-purple-500 focus:outline-none" />
+                            </div>
+                            <div className="md:col-span-3">
+                              <label className="block text-xs text-gray-500 mb-1 flex justify-between">
+                                <span>종목 (Symbol)</span>
+                                <button onClick={() => { setIsCustomSymbol(!isCustomSymbol); if(!isCustomSymbol) setInputSymbol(''); else setInputSymbol('NAS100'); }} className="text-indigo-400 hover:text-indigo-300 text-[10px] underline">{isCustomSymbol ? '목록 선택' : '직접 입력'}</button>
+                              </label>
+                              {!isCustomSymbol ? (
+                                <div className="relative">
+                                  <select value={inputSymbol} onChange={(e) => { if (e.target.value === 'CUSTOM') { setIsCustomSymbol(true); setInputSymbol(''); } else { setInputSymbol(e.target.value); } }} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-gray-200 text-sm focus:border-purple-500 focus:outline-none appearance-none">
+                                    {DEFAULT_TICKERS.map(t => <option key={t} value={t}>{t}</option>)}
+                                    <option value="CUSTOM"> 직접 입력... </option>
+                                  </select>
+                                  <ChevronRight className="absolute right-3 top-1/2 transform -translate-y-1/2 rotate-90 text-gray-500 pointer-events-none" size={14} />
+                                </div>
+                              ) : (
+                                <input type="text" value={inputSymbol} onChange={(e) => setInputSymbol(e.target.value.toUpperCase())} placeholder="종목명 입력" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-gray-200 text-sm focus:border-purple-500 focus:outline-none uppercase" autoFocus />
+                              )}
+                            </div>
+                            <div className="md:col-span-4">
+                              <label className="block text-xs text-gray-500 mb-1">결과 (Result)</label>
+                              <div className="flex bg-gray-900 rounded-lg p-1 border border-gray-700">
+                                {['win', 'loss', 'break_even'].map(r => (
+                                  <button key={r} onClick={() => setInputResult(r)} className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-colors capitalize ${inputResult === r ? (r === 'win' ? 'bg-green-600 text-white' : r === 'loss' ? 'bg-red-600 text-white' : 'bg-gray-600 text-white') : 'text-gray-400 hover:text-gray-200'}`}>{r === 'break_even' ? 'BE' : r}</button>
+                                ))}
+                              </div>
+                            </div>
+                            {/* Dynamic Fields */}
+                            {activeProject.layout?.map(fieldId => {
+                              const field = activeProject.library.find(f => f.id === fieldId);
+                              if (!field) return null;
+                              if (field.type === 'image') {
+                                const hasImage = !!dynamicValues[field.id];
+                                return (
+                                  <div key={field.id} className="md:col-span-12">
+                                     <label className="block text-xs text-purple-300 mb-1">{field.label}</label>
+                                     <div onPaste={(e) => handleImagePaste(e, field.id)} onClick={() => { if(!hasImage) alert('이 영역을 클릭한 상태에서 이미지를 붙여넣기(Ctrl+V) 하세요.'); }} className={`w-full h-32 border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer transition-colors relative overflow-hidden group ${hasImage ? 'border-purple-500 bg-gray-900' : 'border-gray-700 bg-gray-900/50 hover:bg-gray-800'}`}>
+                                        {hasImage ? (
+                                          <>
+                                            <img src={dynamicValues[field.id]} alt="Attached" className="w-full h-full object-contain" />
+                                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                                               <button onClick={(e) => { e.stopPropagation(); handleDynamicChange(field.id, null); }} className="bg-red-600 hover:bg-red-500 text-white px-3 py-1 rounded text-xs">삭제</button>
+                                            </div>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <UploadCloud className="text-gray-500 mb-2" size={24} />
+                                            <p className="text-xs text-gray-400">클릭 후 <span className="text-white font-bold">Ctrl + V</span> 로 이미지 붙여넣기</p>
+                                          </>
+                                        )}
+                                     </div>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div key={field.id} className="md:col-span-3">
+                                  <label className="block text-xs text-purple-300 mb-1">{field.label}</label>
+                                  {field.type === 'number' ? (
+                                    <input type="number" placeholder="0" value={dynamicValues[field.id] || ''} onChange={(e) => handleDynamicChange(field.id, e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-gray-200 text-sm focus:border-purple-500 focus:outline-none" />
+                                  ) : (
+                                    <input type="text" placeholder="입력..." value={dynamicValues[field.id] || ''} onChange={(e) => handleDynamicChange(field.id, e.target.value)} className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-gray-200 text-sm focus:border-purple-500 focus:outline-none" onKeyPress={(e) => e.key === 'Enter' && addLog()} />
+                                  )}
+                                </div>
+                              );
+                            })}
+                            <div className="md:col-span-12 flex justify-end mt-2">
+                              <button onClick={addLog} className="w-full md:w-auto bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 px-8 rounded-lg transition-colors flex items-center justify-center"><Plus size={18} className="mr-2" /> 기록 저장하기</button>
+                            </div>
+                          </div>
+                        </div>
+                        {/* Tracker */}
+                        <div className="bg-gray-800 p-6 rounded-xl border border-gray-700 shadow-md">
+                          <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
+                            <h3 className="text-lg font-bold text-white flex items-center"><Grid className="mr-2 text-purple-400" size={20} /> 진행 상황 (Tracker)</h3>
+                            <div className="flex items-center gap-3 bg-gray-900 p-1.5 rounded-lg border border-gray-700">
+                              <div className="flex bg-gray-800 rounded p-0.5">
+                                <button onClick={() => setViewMode('continuous')} className={`p-1.5 rounded transition-colors ${viewMode === 'continuous' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'}`}><Layout size={14} /></button>
+                                <button onClick={() => setViewMode('monthly')} className={`p-1.5 rounded transition-colors ${viewMode === 'monthly' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:text-white'}`}><Calendar size={14} /></button>
+                              </div>
+                              <div className="h-4 w-[1px] bg-gray-700 mx-1"></div>
+                              <select value={viewLimit} onChange={(e) => setViewLimit(Number(e.target.value))} className="bg-gray-800 text-xs text-white border border-gray-600 rounded px-2 py-1 outline-none focus:border-purple-500">
+                                <option value={50}>50개</option>
+                                <option value={100}>100개</option>
+                                <option value={300}>300개</option>
+                                <option value={1000}>1000개</option>
+                                <option value={0}>전체</option>
+                              </select>
+                            </div>
+                          </div>
+                          {renderTracker()}
+                          <div className="text-right text-xs text-gray-500 mt-2">{activeProject.logs.length}개의 데이터 중 {getFilteredLogs().length}개를 표시 중</div>
+                        </div>
+                        <div className="flex justify-end pt-4">
+                            <button onClick={() => deleteProject(activeProject.id)} className="text-xs text-red-400 hover:text-red-300 flex items-center opacity-60 hover:opacity-100 transition-opacity"><Trash2 size={12} className="mr-1" /> 프로젝트 삭제</button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="h-full flex flex-col items-center justify-center bg-gray-800 rounded-xl border border-gray-700 p-10 text-center opacity-80">
+                        <Activity size={64} className="text-gray-600 mb-4" />
+                        <h3 className="text-xl font-bold text-gray-300 mb-2">선택된 프로젝트가 없습니다</h3>
+                        <button onClick={() => setIsProjectModalOpen(true)} className="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-6 rounded-lg transition-colors">새 프로젝트 생성</button>
+                      </div>
+                    )}
+                  </section>
+                </div>
+              </main>
+
+              {/* Modals omitted for brevity (same logic as before) */}
+              {isProjectModalOpen && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 px-4">
+                  <div className="bg-gray-800 rounded-xl p-6 w-full max-w-md border border-gray-700 shadow-2xl">
+                    <h3 className="text-xl font-bold text-white mb-4">새 프로젝트 생성</h3>
+                    <input type="text" placeholder="프로젝트 이름" className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-gray-200 mb-4 outline-none focus:border-purple-500" value={newProjectName} onChange={(e) => setNewProjectName(e.target.value)} autoFocus onKeyPress={(e) => e.key === 'Enter' && createProject()} />
+                    <div className="flex justify-end space-x-3">
+                      <button onClick={() => setIsProjectModalOpen(false)} className="px-4 py-2 rounded-lg text-gray-300 hover:bg-gray-700">취소</button>
+                      <button onClick={createProject} className="px-4 py-2 rounded-lg bg-purple-600 text-white font-bold hover:bg-purple-500">생성</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {/* Other Modals (Field Editor, Analysis, Image Zoom) */}
+              {/* Field Editor, Analysis Modal, Log Detail, Zoom Modal logic is identical to previous version, implemented within App function */}
+              {isFieldEditorOpen && activeProject && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4 backdrop-blur-sm">
+                  <div className="bg-gray-800 rounded-2xl w-full max-w-4xl border border-gray-600 shadow-2xl h-[80vh] flex flex-col">
+                    <div className="p-6 border-b border-gray-700 flex justify-between items-center bg-gray-850">
+                      <div><h3 className="text-xl font-bold text-white flex items-center"><Monitor className="mr-2 text-indigo-400" /> 필드 편집</h3><p className="text-xs text-gray-400 mt-1">블록을 보관함에서 꺼내거나 넣어 나만의 입력창을 구성하세요.</p></div>
+                      <button onClick={() => setIsFieldEditorOpen(false)} className="text-gray-400 hover:text-white bg-gray-700 p-2 rounded-full"><X size={20} /></button>
+                    </div>
+                    <div className="flex-1 flex overflow-hidden">
+                      <div className="flex-1 border-r border-gray-700 p-6 flex flex-col bg-gray-900/50">
+                        <h4 className="text-sm font-bold text-green-400 uppercase mb-4 flex items-center justify-between"><span>📱 현재 입력 폼</span></h4>
+                        <div className="flex-1 overflow-y-auto space-y-3 custom-scrollbar pr-2">
+                           {activeProject.layout.map((fieldId, index) => {
+                             const field = activeProject.library.find(f => f.id === fieldId); if (!field) return null;
+                             return (
+                              <div key={field.id} className="bg-indigo-900/30 p-3 rounded-lg border border-indigo-500/50 flex justify-between items-center">
+                                 <div className="flex items-center text-gray-200">{field.label}</div>
+                                 <div className="flex items-center gap-1">
+                                    <button onClick={() => moveOrder(index, 'up')} className="p-1 text-gray-400" disabled={index === 0}><ArrowUp size={14}/></button>
+                                    <button onClick={() => moveOrder(index, 'down')} className="p-1 text-gray-400" disabled={index === activeProject.layout.length-1}><ArrowDown size={14}/></button>
+                                    <div className="w-[1px] h-4 bg-gray-600 mx-1"></div>
+                                    <button onClick={() => moveToLibrary(field.id)} className="p-1.5 bg-gray-700 rounded text-gray-300"><ArrowRight size={14}/></button>
+                                 </div>
+                              </div>
+                             )
+                           })}
+                        </div>
+                      </div>
+                      <div className="flex-1 p-6 flex flex-col bg-gray-800">
+                        <h4 className="text-sm font-bold text-blue-400 uppercase mb-4">📦 블록 보관함</h4>
+                        <div className="bg-gray-700/50 p-4 rounded-xl border border-gray-600 mb-6">
+                           <div className="flex gap-2 mb-2"><input type="text" placeholder="블록 이름" className="flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white" value={newBlockName} onChange={(e)=>setNewBlockName(e.target.value)} /><select className="bg-gray-900 border border-gray-600 rounded px-2 py-2 text-sm text-gray-300" value={newBlockType} onChange={(e)=>setNewBlockType(e.target.value)}><option value="text">텍스트</option><option value="number">숫자</option><option value="image">이미지</option></select></div>
+                           <button onClick={createBlock} disabled={!newBlockName.trim()} className="w-full bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold py-2 rounded">+ 추가</button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-2">
+                          {activeProject.library.filter(field => !activeProject.layout.includes(field.id)).map(field => (
+                            <div key={field.id} className="bg-gray-700 p-3 rounded-lg border border-gray-600 flex justify-between items-center">
+                              <span className="text-gray-300">{field.label}</span>
+                              <div className="flex gap-2"><button onClick={() => deleteBlock(field.id)} className="text-red-400"><Trash2 size={14}/></button><button onClick={() => moveToActive(field.id)} className="bg-indigo-600 p-1.5 rounded text-white text-xs"><ArrowLeft size={14}/></button></div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {isAnalysisModalOpen && <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4 backdrop-blur-sm"><div className="bg-gray-800 rounded-2xl p-6 w-full max-w-2xl border border-purple-500/50 shadow-2xl text-white whitespace-pre-wrap"><div className="flex justify-between mb-4"><h3 className="text-xl font-bold">분석 결과</h3><button onClick={()=>setIsAnalysisModalOpen(false)}><XCircle/></button></div>{isAnalyzing ? "분석 중..." : analysisResult}</div></div>}
+              {zoomedImage && <div className="fixed inset-0 bg-black/95 z-[60] flex items-center justify-center p-4 cursor-zoom-out" onClick={() => setZoomedImage(null)}><img src={zoomedImage} className="max-w-full max-h-full object-contain" /><button className="absolute top-4 right-4 text-white"><X size={40}/></button></div>}
+              {selectedLog && !zoomedImage && (
+                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4 backdrop-blur-sm" onClick={() => setSelectedLog(null)}>
+                  <div className="bg-gray-800 rounded-xl p-0 w-full max-w-md border border-gray-600 shadow-2xl overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+                    <div className={`p-4 flex justify-between items-center ${selectedLog.result === 'win' ? 'bg-green-600' : selectedLog.result === 'loss' ? 'bg-red-600' : 'bg-gray-600'}`}><span className="font-bold text-white uppercase">{selectedLog.result}</span><button onClick={() => setSelectedLog(null)} className="text-white"><X size={20}/></button></div>
+                    <div className="p-6 space-y-4 overflow-y-auto custom-scrollbar">
+                      <div className="flex justify-between border-b border-gray-700 pb-2"><span className="text-gray-400 text-sm">Date</span><span className="text-white font-mono">{selectedLog.date}</span></div>
+                      <div className="flex justify-between border-b border-gray-700 pb-2"><span className="text-gray-400 text-sm">Symbol</span><span className="text-white font-bold">{selectedLog.symbol}</span></div>
+                      {activeProject.library.map(field => {
+                         if (!selectedLog[field.id]) return null;
+                         if (field.type === 'image') return <div key={field.id} className="flex flex-col border-b border-gray-700 pb-4"><span className="text-gray-400 text-xs mb-2">{field.label}</span><img src={selectedLog[field.id]} className="rounded-lg border border-gray-700 cursor-zoom-in" onClick={()=>setZoomedImage(selectedLog[field.id])} /></div>
+                         return <div key={field.id} className="flex flex-col border-b border-gray-700 pb-2"><span className="text-gray-400 text-xs mb-1">{field.label}</span><span className="text-white whitespace-pre-wrap">{selectedLog[field.id]}</span></div>
+                      })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        }
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
 </body>
 </html>
